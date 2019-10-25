@@ -1,14 +1,13 @@
 ---
 title: 'Unsupervised Learning: PSet 3'
 author: "Felipe Alamos"
-date: "10/24/2019"
+date: "10/25/2019"
 output: pdf_document
 ---
 
 ```{r, message=FALSE}
 #Setups
 library(dplyr)
-#library(knitr)
 library(skimr)
 library(seriation)
 library(ggplot2)

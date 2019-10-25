@@ -1,0 +1,130 @@
+---
+title: 'Unsupervised Learning: PSet 3'
+author: "Felipe Alamos"
+date: "10/24/2019"
+output: pdf_document
+---
+
+```{r, message=FALSE}
+#Setups
+#library(haven)
+library(tidyverse)
+#library(purrr)
+library(dplyr)
+#library(knitr)
+library(skimr)
+library(ggplot2)
+```
+
+#1.
+_Load the state legislative professionalism data from the relevant subdirectory in this repo. See the codebook for reference in the same subdirectory and combine with our discussion of these data and the concept of state legislative professionalism from class for relevant background information._
+
+```{r}
+data <- get(load(file.choose()))
+head(data)
+```
+
+#2.
+_Munge the data:_
+* select only the continuous features that should capture a state legislature's level of "professionalism" (session length (total and regular), salary, and expenditures); 
+* restrict the data to only include the 2009/10 legislative session for consistency; 
+* omit all missing values; 
+* standardize the input features;
+* and anything else you think necessary to get this subset of data into workable form (_hint_: consider storing the state names as a separate object to be used in plotting later)
+
+```{r}
+data_filtered <- data %>%
+  filter(year == 2009 | year == 2010) %>%
+  na.omit() %>%
+  select(t_slength, slength, salary_real, expend)
+
+#Standardizing certain columns: t_slength, slength, salary_real, expend
+data_scaled <- data_filtered
+data_scaled[, 3:6] <- scale(data_f[ , 3:6])
+
+states <- data %>%
+  filter(year == 2009 | year == 2010) %>%
+  na.omit() %>%
+  select(stateabv)
+  
+```
+
+
+#3.
+_Perform quick EDA visually or numerically and discuss the patterns you see._
+
+```{r}
+skim(data_filtered)
+```
+
+- Most of the data is from 2010
+- All numerical variables are skewed to the left, i.e, they have significant outliers on their high end. This is particularly exacerbated for expenditure, where its max value is more than 100 times the median value. Lets have a closer look at expend:
+
+```{r}
+data_filtered_with_state<-data_filtered
+data_filtered_with_state$state <- states$stateabv
+
+ggplot(data_filtered_with_state, aes(x=reorder(as.factor(state),-expend), expend)) +
+  geom_bar(stat="identity",color="black", fill="white")+
+   theme(axis.text.x = element_text(size=9, angle = 90, vjust=-0.001))+
+   labs(x = "States")
+```
+
+- We observe that the state with the extreme `expenditure` value is CA.
+- We know try to understand correlation between the variables
+
+#session length (total and regular), salary, and expenditures
+```{r}
+#stateabv, year, t_slength, slength, salary_real, expend
+ggplot(data_scaled, aes(x=slength, y=salary_real)) +
+  geom_point()
+ggplot(data_scaled, aes(x=slength, y=expend)) +
+  geom_point()
+```
+
+- We observe that there seems to be a positive correlation between length of regular session and salary, but not with expenditure.
+
+#4.
+_Diagnose clusterability in any way you'd prefer (e.g., sparse sampling, ODI, etc.); display the results and discuss the likelihood that natural, non-random structure exist in these data._
+
+```{r}
+library(seriation)
+df_dist<- dist(data_scaled)
+dissplot(df_dist)
+```
+- From a quick look at this ODI, it seems that there is low likelihood that natural, non-random structure exist in these data.
+- It does look that some outliers - elements that are very far away in distance from all others.
+
+# 5.
+_Fit a k-means algorithm to these data and present the results. Give a quick, high level summary of the output and general patterns. Initialize the algorithm at k=2, and then check this assumption in the validation questions below._
+
+```{r}
+kmeans <- kmeans(data_scaled, 
+              centers = 2,
+              nstart = 15)
+str(kmeans)
+
+kmeans$size
+```
+
+- We observe two clusters, one with 39 elements and the other with 9.
+- We present the centers of the two clusters:
+```{r}
+kmeans$centers
+```
+-And the list indicating to which cluster was each state associated
+```{r}
+kmeans$cluster
+```
+6. Fit a Gaussian mixture model via the EM algorithm to these data and present the results. Give a quick, high level summary of the output and general patterns. Initialize the algorithm at k=2, and then check this assumption in the validation questions below.
+
+7. Fit one additional partitioning technique of your choice (e.g., PAM, CLARA, fuzzy C-means, DBSCAN, etc.), and present and discuss results. Here again initialize at k=2.
+
+8. Compare output of all in a visually useful, simple way (e.g., plotting by state cluster assignment across two features like salary and expenditures).
+
+9. Select a single validation strategy (e.g., compactness via min(WSS), average silhouette width, etc.), and calculate for all three algorithms. Display and compare your results for all three algorithms you fit (k-means, GMM, X). 
+
+10. Discuss the validation output. 
+* What can you take away from the fit? 
+* Which approach is optimal? And optimal at what value of k? 
+* What are reasons you could imagine selecting a technically "sub-optimal" partitioning method, regardless of the validation statistics? 

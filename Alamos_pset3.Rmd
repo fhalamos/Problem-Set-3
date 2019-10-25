@@ -7,20 +7,23 @@ output: pdf_document
 
 ```{r, message=FALSE}
 #Setups
-#library(haven)
-library(tidyverse)
-#library(purrr)
+
 library(dplyr)
 #library(knitr)
 library(skimr)
+library(seriation)
 library(ggplot2)
+library(dbscan)
+library(mixtools)
+library(plotGMM)
+library(gridExtra)
 ```
 
 #1.
 _Load the state legislative professionalism data from the relevant subdirectory in this repo. See the codebook for reference in the same subdirectory and combine with our discussion of these data and the concept of state legislative professionalism from class for relevant background information._
 
 ```{r}
-data <- get(load(file.choose()))
+data <- get(load("StateLegProfData&Codebook/legprof-components.v1.0.RData"))
 head(data)
 ```
 
@@ -34,19 +37,17 @@ _Munge the data:_
 
 ```{r}
 data_filtered <- data %>%
-  filter(year == 2009 | year == 2010) %>%
+  filter(sessid == "2009/10") %>%
   na.omit() %>%
   select(t_slength, slength, salary_real, expend)
 
-#Standardizing certain columns: t_slength, slength, salary_real, expend
-data_scaled <- data_filtered
-data_scaled[, 3:6] <- scale(data_f[ , 3:6])
+#Standardizing
+data_scaled <- as.data.frame(scale(data_filtered))
 
 states <- data %>%
-  filter(year == 2009 | year == 2010) %>%
+  filter(sessid == "2009/10") %>%
   na.omit() %>%
   select(stateabv)
-  
 ```
 
 
@@ -54,7 +55,8 @@ states <- data %>%
 _Perform quick EDA visually or numerically and discuss the patterns you see._
 
 ```{r}
-skim(data_filtered)
+#skim(data_filtered), some problem with Knit happening
+summary(data_filtered)
 ```
 
 - Most of the data is from 2010
@@ -82,32 +84,35 @@ ggplot(data_scaled, aes(x=slength, y=expend)) +
   geom_point()
 ```
 
-- We observe that there seems to be a positive correlation between length of regular session and salary, but not with expenditure.
+- We observe that there seems to be a positive correlation between length of regular session and salary. We might state the same for expenditure, but the correlation is much weaker.
 
-#4.
+# 4
+
 _Diagnose clusterability in any way you'd prefer (e.g., sparse sampling, ODI, etc.); display the results and discuss the likelihood that natural, non-random structure exist in these data._
 
 ```{r}
-library(seriation)
+
 df_dist<- dist(data_scaled)
 dissplot(df_dist)
 ```
-- From a quick look at this ODI, it seems that there is low likelihood that natural, non-random structure exist in these data.
-- It does look that some outliers - elements that are very far away in distance from all others.
+- From a quick look at this ODI, it seems that there is one big cluster, and then a second small one
+- It does look that some outliers exist - elements that are very far away in distance from most others (this might be the ones groupin in the small cluster).
 
-# 5.
+# 5
 _Fit a k-means algorithm to these data and present the results. Give a quick, high level summary of the output and general patterns. Initialize the algorithm at k=2, and then check this assumption in the validation questions below._
 
 ```{r}
+set.seed(123)
 kmeans <- kmeans(data_scaled, 
               centers = 2,
               nstart = 15)
+
 str(kmeans)
 
 kmeans$size
 ```
 
-- We observe two clusters, one with 39 elements and the other with 9.
+- We observe two clusters, one with 43 elements and the other with 6.
 - We present the centers of the two clusters:
 ```{r}
 kmeans$centers
@@ -115,12 +120,128 @@ kmeans$centers
 -And the list indicating to which cluster was each state associated
 ```{r}
 kmeans$cluster
+
+#We create a df where to save the clusters
+data_scaled_with_clusters <- data_scaled
+data_scaled_with_clusters$KmeansCluster <- as.factor(kmeans$cluster)
 ```
-6. Fit a Gaussian mixture model via the EM algorithm to these data and present the results. Give a quick, high level summary of the output and general patterns. Initialize the algorithm at k=2, and then check this assumption in the validation questions below.
 
-7. Fit one additional partitioning technique of your choice (e.g., PAM, CLARA, fuzzy C-means, DBSCAN, etc.), and present and discuss results. Here again initialize at k=2.
+# 6.
 
-8. Compare output of all in a visually useful, simple way (e.g., plotting by state cluster assignment across two features like salary and expenditures).
+_Fit a Gaussian mixture model via the EM algorithm to these data and present the results. Give a quick, high level summary of the output and general patterns. Initialize the algorithm at k=2, and then check this assumption in the validation questions below._
+
+```{r}
+
+
+#We use the multi-variate method so as to consider all columns of data
+set.seed(123)
+gmm1 <- mvnormalmixEM(data_scaled, k = 2) 
+```
+
+For the two cluster, we observe means on each of the variables:
+```{r}
+gmm1$mu
+```
+...standard deviations (notice that here we present the covariance matrix - in the diagonal we can find standard deviations)
+```{r}
+gmm1$sigma
+```
+... and heights:
+```{r}
+gmm1$lambda
+```
+
+... and the probabilities of each point being part of each of the two clusters:
+```{r}
+post <- as.data.frame(gmm1$posterior)
+post
+
+# quick viz distribution of mixture proportions
+plot(post$comp.1, post$comp.2) 
+```
+- We can observe that states are represented either by one distribution or the other, not a mixture of them
+
+```{r}
+# get counts for each component 
+post$component <- ifelse(post$comp.1 < 0.2, 2, 1)
+table(post$component) 
+```
+- The first cluster has 44 states, the sencond one 5.
+
+```{r}
+# We add the clusters obtained by gmm to our dataframe
+data_scaled_with_clusters$ClusterGMM <- post$component
+```
+
+# 7.
+Fit one additional partitioning technique of your choice (e.g., PAM, CLARA, fuzzy C-means, DBSCAN, etc.), and present and discuss results. Here again initialize at k=2.
+
+We will be using DBSCAN:
+```{r}
+
+
+#To identify the ideal epsilon, we can follow the techinque explained here: http://www.sthda.com/english/wiki/wiki.php?id_contents=7940 Nonetheless, we will use an epsilon that can generate 2 clusters, so as to compare it with the other algorithms.
+#dbscan::kNNdistplot(data_scaled, k =  5)
+#abline(h = 0.15, lty = 2)
+#knee ideal ~1.5
+
+dbscan <- dbscan(data_scaled, 
+                    eps= 0.5) 
+dbscan$cluster #0 indicates noise point
+
+n_non_clustered <- sum(dbscan$cluster == 0)
+n_clustered_in_1<- sum(dbscan$cluster == 1)
+n_clustered_in_2<- sum(dbscan$cluster == 2)
+```
+
+-We observe that the 49 datapoints have been separated in two clusters. One with `r n_clustered_in_1` states, the other with `r n_clustered_in_2` states, and `r n_non_clustered` were not clustered.
+
+```{r}
+data_scaled_with_clusters$ClusterDBscan <- dbscan$cluster
+```
+
+# 8.
+
+_Compare output of all in a visually useful, simple way (e.g., plotting by state cluster assignment across two features like salary and expenditures)._
+
+```{r}
+data_scaled_with_clusters
+
+# View the salary by clusters
+kmeans_salary_plot <- ggplot(data_scaled_with_clusters, aes(x = salary_real)) + 
+  geom_histogram(aes(fill = factor(KmeansCluster)), stat ="bin", binwidth = 3) +
+  labs(x = "Standarized salary",
+       y = "Count of States",
+       title = "KMeans Mixture Model") +
+  scale_fill_manual(values=c("chartreuse4", "dodgerblue4"),
+                    name="Component") +
+  theme_bw()
+
+gmm_salary_plot <- ggplot(data_scaled_with_clusters, aes(x = salary_real)) + 
+  geom_histogram(aes(fill = factor(ClusterGMM)), stat ="bin", binwidth = 3) +
+  labs(x = "Standarized salary",
+       y = "Count of States",
+       title = "Gaussian Mixture Model") +
+  scale_fill_manual(values=c("chartreuse3", "dodgerblue3"),
+                    name="Component") +
+  theme_bw()
+
+dbscan_salary_plot <- ggplot(data_scaled_with_clusters, aes(x = salary_real)) + 
+  geom_histogram(aes(fill = factor(ClusterDBscan)), stat ="bin", binwidth = 3) +
+  labs(x = "Standarized salary",
+       y = "Count of States",
+       title = "DBScan Model") +
+  scale_fill_manual(values=c("gainsboro", "chartreuse2", "dodgerblue1"),
+                    name="Component") +
+  theme_bw()
+
+# view side by side
+grid.arrange(kmeans_salary_plot, gmm_salary_plot, dbscan_salary_plot, ncol = 3)
+```
+
+
+
+
 
 9. Select a single validation strategy (e.g., compactness via min(WSS), average silhouette width, etc.), and calculate for all three algorithms. Display and compare your results for all three algorithms you fit (k-means, GMM, X). 
 
@@ -128,3 +249,14 @@ kmeans$cluster
 * What can you take away from the fit? 
 * Which approach is optimal? And optimal at what value of k? 
 * What are reasons you could imagine selecting a technically "sub-optimal" partitioning method, regardless of the validation statistics? 
+
+
+**dbscan:
+The benefit of this approach is its flexible to find interesting, unique
+configurations that could more accurately characterize complex space
+Regardless, the ability to not cluster each observation makes this
+approach relatively free from the influence of outliers (which could be
+good or bad, depending on the data, domain, etc.)
+Unlike to K-means, DBSCAN does not require the user to specify the number of clusters to be generated
+DBSCAN can find any shape of clusters. The cluster doesn’t have to be circular.
+DBSCAN can identify outliers

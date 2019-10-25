@@ -7,7 +7,6 @@ output: pdf_document
 
 ```{r, message=FALSE}
 #Setups
-
 library(dplyr)
 #library(knitr)
 library(skimr)
@@ -17,6 +16,7 @@ library(dbscan)
 library(mixtools)
 library(plotGMM)
 library(gridExtra)
+library(clValid)
 ```
 
 #1.
@@ -95,8 +95,9 @@ _Diagnose clusterability in any way you'd prefer (e.g., sparse sampling, ODI, et
 df_dist<- dist(data_scaled)
 dissplot(df_dist)
 ```
-- From a quick look at this ODI, it seems that there is one big cluster, and then a second small one
-- It does look that some outliers exist - elements that are very far away in distance from most others (this might be the ones groupin in the small cluster).
+
+- From a quick look at this ODI, it seems that there is one big cluster, and then a group of points that are not necessarily clustered together.
+- It does look that some outliers exist - elements that are very far away in distance from most others (this might be the ones grouping in the small cluster).
 
 # 5
 _Fit a k-means algorithm to these data and present the results. Give a quick, high level summary of the output and general patterns. Initialize the algorithm at k=2, and then check this assumption in the validation questions below._
@@ -142,7 +143,7 @@ For the two cluster, we observe means on each of the variables:
 ```{r}
 gmm1$mu
 ```
-...standard deviations (notice that here we present the covariance matrix - in the diagonal we can find standard deviations)
+...standard deviations (notice that here we present the co variance matrix - in the diagonal we can find standard deviations)
 ```{r}
 gmm1$sigma
 ```
@@ -154,7 +155,6 @@ gmm1$lambda
 ... and the probabilities of each point being part of each of the two clusters:
 ```{r}
 post <- as.data.frame(gmm1$posterior)
-post
 
 # quick viz distribution of mixture proportions
 plot(post$comp.1, post$comp.2) 
@@ -166,7 +166,7 @@ plot(post$comp.1, post$comp.2)
 post$component <- ifelse(post$comp.1 < 0.2, 2, 1)
 table(post$component) 
 ```
-- The first cluster has 44 states, the sencond one 5.
+- The first cluster has 44 states, the second one 5.
 
 ```{r}
 # We add the clusters obtained by gmm to our dataframe
@@ -181,9 +181,6 @@ We will be using DBSCAN:
 
 
 #To identify the ideal epsilon, we can follow the techinque explained here: http://www.sthda.com/english/wiki/wiki.php?id_contents=7940 Nonetheless, we will use an epsilon that can generate 2 clusters, so as to compare it with the other algorithms.
-#dbscan::kNNdistplot(data_scaled, k =  5)
-#abline(h = 0.15, lty = 2)
-#knee ideal ~1.5
 
 dbscan <- dbscan(data_scaled, 
                     eps= 0.5) 
@@ -194,7 +191,8 @@ n_clustered_in_1<- sum(dbscan$cluster == 1)
 n_clustered_in_2<- sum(dbscan$cluster == 2)
 ```
 
--We observe that the 49 datapoints have been separated in two clusters. One with `r n_clustered_in_1` states, the other with `r n_clustered_in_2` states, and `r n_non_clustered` were not clustered.
+-We observe that the 49 data points have been separated in two clusters. One with `r n_clustered_in_1` states, the other with `r n_clustered_in_2` states, and `r n_non_clustered` were not clustered.
+-Its interesting to notice that this algorithm - because of its totally different approach to clustering compared to kmeans - allows for the detection of outliers or samples that are not significantly coherent members of any cluster. In addition, the algorithm gives us the chance to modify this through the parameter epsilon (which determines the distance that must exist between the points to be part of the same cluster)
 
 ```{r}
 data_scaled_with_clusters$ClusterDBscan <- dbscan$cluster
@@ -205,33 +203,31 @@ data_scaled_with_clusters$ClusterDBscan <- dbscan$cluster
 _Compare output of all in a visually useful, simple way (e.g., plotting by state cluster assignment across two features like salary and expenditures)._
 
 ```{r}
-data_scaled_with_clusters
-
 # View the salary by clusters
-kmeans_salary_plot <- ggplot(data_scaled_with_clusters, aes(x = salary_real)) + 
-  geom_histogram(aes(fill = factor(KmeansCluster)), stat ="bin", binwidth = 3) +
+kmeans_salary_plot <- ggplot(data_scaled_with_clusters, aes(x = salary_real, y=expend)) + 
+  geom_point(aes(colour = factor(KmeansCluster))) +
   labs(x = "Standarized salary",
        y = "Count of States",
        title = "KMeans Mixture Model") +
-  scale_fill_manual(values=c("chartreuse4", "dodgerblue4"),
+  scale_color_manual(values=c("chartreuse4", "dodgerblue4"),
                     name="Component") +
   theme_bw()
 
-gmm_salary_plot <- ggplot(data_scaled_with_clusters, aes(x = salary_real)) + 
-  geom_histogram(aes(fill = factor(ClusterGMM)), stat ="bin", binwidth = 3) +
+gmm_salary_plot <- ggplot(data_scaled_with_clusters, aes(x = salary_real, y=expend)) + 
+  geom_point(aes(colour = factor(ClusterGMM))) +
   labs(x = "Standarized salary",
        y = "Count of States",
        title = "Gaussian Mixture Model") +
-  scale_fill_manual(values=c("chartreuse3", "dodgerblue3"),
+  scale_color_manual(values=c("chartreuse3", "dodgerblue3"),
                     name="Component") +
   theme_bw()
 
-dbscan_salary_plot <- ggplot(data_scaled_with_clusters, aes(x = salary_real)) + 
-  geom_histogram(aes(fill = factor(ClusterDBscan)), stat ="bin", binwidth = 3) +
+dbscan_salary_plot <- ggplot(data_scaled_with_clusters, aes(x = salary_real, y=expend)) + 
+  geom_point(aes(colour = factor(ClusterDBscan))) +
   labs(x = "Standarized salary",
        y = "Count of States",
        title = "DBScan Model") +
-  scale_fill_manual(values=c("gainsboro", "chartreuse2", "dodgerblue1"),
+  scale_color_manual(values=c("gainsboro", "chartreuse2", "dodgerblue1"),
                     name="Component") +
   theme_bw()
 
@@ -240,23 +236,50 @@ grid.arrange(kmeans_salary_plot, gmm_salary_plot, dbscan_salary_plot, ncol = 3)
 ```
 
 
+- We can observe that KMeans and Gaussian Models fairly identify the same clusters. DBScan is more different and does not cluster many points, though some of them seem to be grouped in the same way as in the previous two methods.
 
 
+# 9.
 
-9. Select a single validation strategy (e.g., compactness via min(WSS), average silhouette width, etc.), and calculate for all three algorithms. Display and compare your results for all three algorithms you fit (k-means, GMM, X). 
+_Select a single validation strategy (e.g., compactness via min(WSS), average silhouette width, etc.), and calculate for all three algorithms. Display and compare your results for all three algorithms you fit (k-means, GMM, X)._ 
 
-10. Discuss the validation output. 
-* What can you take away from the fit? 
+```{r}
+#Possible values for clValid: "hierarchical", "kmeans", "diana", "fanny", "som", "model", "sota", "pam", "clara",
+#I could not find a way to validate for gmm and dbscan, so doing it for hierarchical and pam instead
+
+internal <- clValid(data_scaled, 2:10,
+                    clMethods = c("kmeans", "pam", "hierarchical"),
+                    validation = "internal")
+summary(internal)
+
+# par(mfrow = c(2, 2))
+# plot(kmeans_internal, legend = FALSE,
+#      type = "l",
+#      main = " ")
+```
+
+Although the clValid method gives us scores for Connectivity, Dunn and Silhoutte, we will focus in a single validation strategy: Connectivity, due to its intuitive interpretation (measures proximity between individual observations in the same cluster, and hence a low connectivity score indicates good clustering).
+
+We can observe that the hierarchical method is the one with best connectivity score, particularly when using 2 clusters (for 2 clusters, hierarchical has connectivity equal to 6.1, whereas kmeans and pam have 8.4 and 7.9 respectively). We can also notice that, for hierarchical, connectivity does not increase too much when moving from 2 to 3 clusters, but it does for kmeans and very significantly for pam.
+
+
+# 10.
+
+_Discuss the validation output._
+
+* What can you take away from the fit?
+
+First of all, interesting enough, we can realize how a pairwise technique (hierarchical) performs better than partitioning techniques. Nevertheless, the differences in performance are not that significant, which seem to validate both approaches
+Second, its interesting to compare kmeans and pams, especially because they are fundamentally very similar in their algorithmic approach (only difference is in how to define the center of the clusters). Surprisingly, their performance on connectivity is very different, especially for k>2, with kmeans usually having better performance. This suggest that the idea of defining clusters based on fictitious points that are the result of averaging the points of a cluster, is better than using a point of the cluster to represent all of the set. 
+
+
 * Which approach is optimal? And optimal at what value of k? 
+
+When considering connectivity, the best approach is the hierarchical model, with k=2.
+If we do not want to consider hierarchical in the analysis, the best approach is pam with k=2.
+
 * What are reasons you could imagine selecting a technically "sub-optimal" partitioning method, regardless of the validation statistics? 
 
-
-**dbscan:
-The benefit of this approach is its flexible to find interesting, unique
-configurations that could more accurately characterize complex space
-Regardless, the ability to not cluster each observation makes this
-approach relatively free from the influence of outliers (which could be
-good or bad, depending on the data, domain, etc.)
-Unlike to K-means, DBSCAN does not require the user to specify the number of clusters to be generated
-DBSCAN can find any shape of clusters. The cluster doesn’t have to be circular.
-DBSCAN can identify outliers
+There might be domain specific restrictions that propose one method over other, or that makes some approach less reasonable. 
+So, for example, it might be totally possible not to be willing to demand that all samples have to be in a cluster, and hence a gmm approach would be preferred, maybe relaxing restrictions of validations statistics.
+It could also happen that grouping around a fictitious average of points (like kmeans does), is not appropriate for certain context, and hence we could choose pam. This is particularly useful in context where we want to inform the public which is this member representing the cluster. It could also be the case that features of the samples are discrete values, and hence using an "average" representation points makes less sense.
